@@ -261,7 +261,7 @@
                   >
                     <img
                       v-if="isImageFile(file)"
-                      :src="file.fileUrl || `/api/files/${file.id}`"
+                      :src="file.fileUrl || getApiUrl(`/files/${file.id}`)"
                       alt="附件"
                     />
                     <el-icon v-else class="file-icon"><Document /></el-icon>
@@ -275,6 +275,7 @@
                 {{ record.type === 'INCOME' ? '+' : '-' }}{{ formatMoney(record.amount) }}
               </div>
               <el-button
+                v-if="record.userId === currentUserId"
                 type="danger"
                 text
                 size="small"
@@ -509,7 +510,7 @@
       <div style="text-align: center">
         <img
           v-if="previewFile && isImageFile(previewFile)"
-          :src="previewFile.fileUrl || `/api/files/${previewFile.id}`"
+          :src="previewFile.fileUrl || getApiUrl(`/files/${previewFile.id}`)"
           style="max-width: 100%; max-height: 500px"
           alt="预览"
         />
@@ -536,6 +537,7 @@ import { uploadFiles } from '@/api/file'
 import { setMemberTarget, deleteMemberTarget } from '@/api/member-target'
 import { useUserStore } from '@/stores/user'
 import { formatMoney, formatDate, getPriorityText, getPriorityType } from '@/utils/format'
+import { getApiUrl } from '@/utils/api'
 import Avatar from '@/components/Avatar.vue'
 import ProgressCard from '@/components/ProgressCard.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -904,7 +906,7 @@ const handlePreviewFile = (file) => {
 
 const handleDownloadFile = () => {
   if (previewFile.value) {
-    const url = previewFile.value.fileUrl || `/api/files/${previewFile.value.id}`
+    const url = previewFile.value.fileUrl || getApiUrl(`/files/${previewFile.value.id}`)
     window.open(url, '_blank')
   }
 }

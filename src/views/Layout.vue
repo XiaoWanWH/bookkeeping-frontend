@@ -9,6 +9,64 @@
         <span class="logo-text">记账本</span>
       </div>
       <div class="user-info">
+        <!-- 事件通知按钮 -->
+        <el-badge :value="unreadEvents" :hidden="unreadEvents === 0" class="notification-badge">
+          <el-popover
+            placement="bottom"
+            :width="380"
+            trigger="click"
+            popper-class="notification-popover"
+          >
+            <div class="notification-panel">
+              <div class="notification-header">
+                <span class="notification-title">消息通知</span>
+                <el-button type="primary" text size="small" @click="handleMarkAllAsRead" v-if="unreadEvents > 0">
+                  全部已读
+                </el-button>
+              </div>
+              <div class="notification-list">
+                <div v-if="events.length === 0 && !loadingNotifications" class="empty-notifications">
+                  <el-empty description="暂无消息通知" :image-size="60" />
+                </div>
+                <div
+                  v-for="event in events"
+                  :key="event.id"
+                  class="notification-item"
+                  :class="{ unread: !event.isRead }"
+                  @click="handleEventClick(event)"
+                >
+                  <div class="notification-avatar">
+                    <Avatar
+                      :avatar="event.actorAvatar"
+                      :username="event.actorUsername"
+                      :nickname="event.actorNickname"
+                      :size="40"
+                    />
+                  </div>
+                  <div class="notification-content">
+                    <div class="notification-text">{{ event.content }}</div>
+                    <div class="notification-time">{{ formatTime(event.createTime) }}</div>
+                  </div>
+                  <el-button
+                    type="danger"
+                    text
+                    size="small"
+                    @click.stop="handleDeleteEvent(event.id)"
+                    class="delete-btn"
+                  >
+                    <el-icon><Delete /></el-icon>
+                  </el-button>
+                </div>
+              </div>
+            </div>
+            <template #reference>
+              <div class="notification-trigger">
+                <el-icon><Bell /></el-icon>
+              </div>
+            </template>
+          </el-popover>
+        </el-badge>
+        
         <div class="user-display">
           <Avatar
             :avatar="userStore.avatar"
@@ -89,14 +147,22 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { useInvitationStore } from '@/stores/invitation'
 import Avatar from '@/components/Avatar.vue'
-import { getInvitations } from '@/api/invitation'
+import { getEvents, markAsRead, markAllAsRead, deleteEvent } from '@/api/event'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const invitationStore = useInvitationStore()
 
-const pendingInvitations = ref(0)
+const pendingInvitations = computed(() => invitationStore.pendingInvitations)
+const events = ref([])
+const loadingNotifications = ref(false)
+let isFirstLoad = true
+
+const unreadEvents = computed(() => events.value.filter(e => !e.isRead).length)
 
 const activeMenu = computed(() => {
   if (route.path.startsWith('/tasks')) return '/tasks'
@@ -116,18 +182,90 @@ const handleCommand = (command) => {
 }
 
 const fetchPendingInvitations = async () => {
-  try {
-    const res = await getInvitations()
-    const data = res.data || res
-    const list = Array.isArray(data) ? data : (data.list || data.content || data.records || [])
-    pendingInvitations.value = list.filter(inv => inv.status === 0 || inv.status === 'PENDING').length
-  } catch (error) {
-    // 忽略错误
+  await invitationStore.fetchInvitations()
+}
+
+const fetchEvents = async (showLoading = false) => {
+  if (showLoading) {
+    loadingNotifications.value = true
   }
+  try {
+    const res = await getEvents()
+    const data = res.data || res
+    events.value = Array.isArray(data) ? data : (data.list || data.content || data.records || [])
+    isFirstLoad = false
+  } catch (error) {
+    console.error('获取事件通知失败:', error)
+  } finally {
+    if (showLoading) {
+      loadingNotifications.value = false
+    }
+  }
+}
+
+const handleEventClick = async (event) => {
+  if (!event.isRead) {
+    try {
+      await markAsRead(event.id)
+      event.isRead = true
+    } catch (error) {
+      console.error('标记已读失败:', error)
+    }
+  }
+  // 这里可以根据事件类型跳转到不同页面
+  if (event.taskId) {
+    router.push(`/tasks/${event.taskId}`)
+  }
+}
+
+const handleMarkAllAsRead = async () => {
+  try {
+    await markAllAsRead()
+    events.value.forEach(e => e.isRead = true)
+    ElMessage.success('已全部标记为已读')
+  } catch (error) {
+    console.error('全部已读失败:', error)
+    ElMessage.error('操作失败')
+  }
+}
+
+const handleDeleteEvent = async (eventId) => {
+  try {
+    await ElMessageBox.confirm('确定要删除这条消息吗?', '确认删除', {
+      type: 'warning'
+    })
+    await deleteEvent(eventId)
+    events.value = events.value.filter(e => e.id !== eventId)
+    ElMessage.success('删除成功')
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('删除失败:', error)
+      ElMessage.error('删除失败')
+    }
+  }
+}
+
+const formatTime = (timeStr) => {
+  const time = new Date(timeStr)
+  const now = new Date()
+  const diff = now - time
+  const minutes = Math.floor(diff / 60000)
+  const hours = Math.floor(diff / 3600000)
+  const days = Math.floor(diff / 86400000)
+  
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes}分钟前`
+  if (hours < 24) return `${hours}小时前`
+  if (days < 7) return `${days}天前`
+  return time.toLocaleDateString()
 }
 
 onMounted(() => {
   fetchPendingInvitations()
+  fetchEvents(true)
+  
+  // 定期更新事件通知（不显示加载状态）
+  setInterval(() => fetchEvents(false), 30000)
 })
 </script>
 
@@ -182,6 +320,23 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 1rem;
+}
+
+.notification-trigger {
+  padding: 0.5rem;
+  border-radius: 0.75rem;
+  transition: all 0.25s ease;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  color: var(--gray-600);
+}
+
+.notification-trigger:hover {
+  background: var(--gray-100);
+  color: var(--primary-600);
 }
 
 .user-display {
@@ -266,6 +421,102 @@ onMounted(() => {
   margin-right: 0.5rem;
 }
 
+/* 通知面板样式 */
+.notification-panel {
+  max-height: 480px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.notification-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--gray-200);
+  margin-bottom: 0.5rem;
+}
+
+.notification-title {
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--gray-800);
+}
+
+.notification-list {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 400px;
+}
+
+
+
+.empty-notifications {
+  padding: 2rem 1rem;
+}
+
+.notification-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  position: relative;
+}
+
+.notification-item:hover {
+  background: var(--gray-50);
+}
+
+.notification-item.unread {
+  background: var(--primary-50);
+}
+
+.notification-item.unread::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--primary-500);
+}
+
+.notification-avatar {
+  flex-shrink: 0;
+  padding-left: 12px;
+}
+
+.notification-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.notification-text {
+  font-size: 0.9375rem;
+  color: var(--gray-800);
+  line-height: 1.4;
+  margin-bottom: 4px;
+}
+
+.notification-time {
+  font-size: 0.75rem;
+  color: var(--gray-500);
+}
+
+.delete-btn {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.notification-item:hover .delete-btn {
+  opacity: 1;
+}
+
 /* 下拉菜单样式 */
 .custom-dropdown {
   padding: 0.5rem;
@@ -307,4 +558,3 @@ onMounted(() => {
   background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
 }
 </style>
-

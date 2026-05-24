@@ -70,14 +70,16 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { getInvitations, acceptInvitation, rejectInvitation } from '@/api/invitation'
 import { formatDate } from '@/utils/format'
+import { useInvitationStore } from '@/stores/invitation'
 import Avatar from '@/components/Avatar.vue'
 import { ElMessage } from 'element-plus'
 
 const loading = ref(false)
-const invitations = ref([])
+const invitationStore = useInvitationStore()
+const invitations = computed(() => invitationStore.invitations)
 
 const getStatusText = (status) => {
   const map = {
@@ -100,8 +102,7 @@ const getStatusType = (status) => {
 const fetchInvitations = async () => {
   loading.value = true
   try {
-    const res = await getInvitations()
-    invitations.value = res.data || res || []
+    await invitationStore.fetchInvitations()
   } catch (error) {
     // 错误已在拦截器中处理
   } finally {
@@ -113,7 +114,9 @@ const handleAccept = async (id) => {
   try {
     await acceptInvitation(id)
     ElMessage.success('🎉 已接受邀请！')
-    fetchInvitations()
+    // 更新store，同时刷新两个组件的显示
+    invitationStore.decrementPendingInvitations()
+    await invitationStore.fetchInvitations()
   } catch (error) {
     // 错误已在拦截器中处理
   }
@@ -123,7 +126,9 @@ const handleReject = async (id) => {
   try {
     await rejectInvitation(id)
     ElMessage.success('已拒绝邀请')
-    fetchInvitations()
+    // 更新store，同时刷新两个组件的显示
+    invitationStore.decrementPendingInvitations()
+    await invitationStore.fetchInvitations()
   } catch (error) {
     // 错误已在拦截器中处理
   }
